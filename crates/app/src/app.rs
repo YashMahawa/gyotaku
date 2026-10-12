@@ -257,6 +257,7 @@ struct Detail {
     grow: bool,
     from: Bounds<Pixels>,
     image_rect: Bounds<Pixels>,
+    preview_area: Bounds<Pixels>,
     hovered: Option<usize>,
     drag: Option<(Point<Pixels>, Point<Pixels>)>,
     picked: Vec<usize>,
@@ -1381,6 +1382,7 @@ impl Gyotaku {
                 grow,
                 from,
                 image_rect: from,
+                preview_area: from,
                 zoom: crate::zoom::Zoom::new(),
                 hovered: None,
                 drag: None,
@@ -1438,6 +1440,9 @@ impl Gyotaku {
 
     fn line_at(&self, p: Point<Pixels>) -> Option<usize> {
         let d = self.detail.as_ref()?;
+        if !d.preview_area.contains(&p) {
+            return None;
+        }
         d.lines
             .iter()
             .position(|l| on_screen(l.rect, d.image_rect).contains(&p))
@@ -1461,6 +1466,9 @@ impl Gyotaku {
 
     fn detail_mouse_down(&mut self, e: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(d) = &mut self.detail {
+            if !d.preview_area.contains(&e.position) {
+                return;
+            }
             d.drag = Some((e.position, e.position));
             d.picked.clear();
             cx.notify();
@@ -2046,6 +2054,12 @@ impl Gyotaku {
                 viewport.height - px(DETAIL_TOP + DETAIL_BOTTOM),
             ),
         );
+        d.preview_area = area;
+        let clip = if d.zoom.scale > 1. {
+            area
+        } else {
+            Bounds::new(point(px(0.), px(0.)), viewport)
+        };
         let base = fit(hit.width as f32 / hit.height.max(1) as f32, area);
         let target = d.zoom.rect(base, area);
         // The tile only shows the crop, so the full image starts out as the
@@ -2091,8 +2105,8 @@ impl Gyotaku {
             };
             let mut el = div()
                 .absolute()
-                .left(b.origin.x)
-                .top(b.origin.y)
+                .left(b.origin.x - clip.origin.x)
+                .top(b.origin.y - clip.origin.y)
                 .w(b.size.width)
                 .h(b.size.height)
                 .rounded(px(4.))
@@ -2110,8 +2124,8 @@ impl Gyotaku {
                 let r = Bounds::from_corners(a.min(&b), a.max(&b));
                 div()
                     .absolute()
-                    .left(r.origin.x)
-                    .top(r.origin.y)
+                    .left(r.origin.x - clip.origin.x)
+                    .top(r.origin.y - clip.origin.y)
                     .w(r.size.width)
                     .h(r.size.height)
                     .rounded(px(3.))
@@ -2161,7 +2175,7 @@ impl Gyotaku {
                         };
                         let delta = event.delta.pixel_delta(px(24.));
                         if event.modifiers.control || event.modifiers.platform {
-                            let scale = detail.zoom.scale * (delta.y.as_f32() * 0.004).exp();
+                            let scale = detail.zoom.scale * (delta.y.as_f32() * 0.0015).exp();
                             detail.zoom.set(scale, event.position, base, area);
                         } else if detail.zoom.scale > 1. {
                             detail.zoom.move_by(delta, base, area);
@@ -2185,28 +2199,37 @@ impl Gyotaku {
                 )
                 // The thumbnail is already decoded, so it carries the move
                 // until the full size image lands on top of it.
-                .children(thumb.map(|t| {
-                    img(t)
+                .child(
+                    div()
                         .absolute()
-                        .left(thumb_rect.origin.x)
-                        .top(thumb_rect.origin.y)
-                        .w(thumb_rect.size.width)
-                        .h(thumb_rect.size.height)
-                        .rounded(radius)
-                        .opacity(fade)
-                }))
-                .children(full.map(|f| {
-                    img(f)
-                        .absolute()
-                        .left(rect.origin.x)
-                        .top(rect.origin.y)
-                        .w(rect.size.width)
-                        .h(rect.size.height)
-                        .rounded(radius)
-                        .opacity(fade)
-                }))
-                .children(boxes)
-                .children(drag)
+                        .left(clip.origin.x)
+                        .top(clip.origin.y)
+                        .w(clip.size.width)
+                        .h(clip.size.height)
+                        .overflow_hidden()
+                        .children(thumb.map(|t| {
+                            img(t)
+                                .absolute()
+                                .left(thumb_rect.origin.x - clip.origin.x)
+                                .top(thumb_rect.origin.y - clip.origin.y)
+                                .w(thumb_rect.size.width)
+                                .h(thumb_rect.size.height)
+                                .rounded(radius)
+                                .opacity(fade)
+                        }))
+                        .children(full.map(|f| {
+                            img(f)
+                                .absolute()
+                                .left(rect.origin.x - clip.origin.x)
+                                .top(rect.origin.y - clip.origin.y)
+                                .w(rect.size.width)
+                                .h(rect.size.height)
+                                .rounded(radius)
+                                .opacity(fade)
+                        }))
+                        .children(boxes)
+                        .children(drag),
+                )
                 .child(
                     div()
                         .absolute()
