@@ -41,9 +41,9 @@ pub struct Config {
     /// a key away (see `burst`). On unless turned off, and only written then.
     #[serde(skip_serializing_if = "Clone::clone")]
     pub group_similar: bool,
-    /// Adapt the search window to the display it opens on. The fixed-size
-    /// palette is still available by turning this off.
-    #[serde(skip_serializing_if = "Clone::clone")]
+    /// Adapt the search window to the display it opens on when enabled.
+    /// The fixed-size palette remains the default.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dynamic_window_size: bool,
     /// Shortcuts changed from their defaults, by name, like
     /// `trash = "ctrl-backspace"`. Only the changed ones are written. Last,
@@ -62,7 +62,7 @@ impl Default for Config {
             clipboard_folder: None,
             scripts: Vec::new(),
             group_similar: true,
-            dynamic_window_size: true,
+            dynamic_window_size: false,
             keys: BTreeMap::new(),
         }
     }
@@ -245,7 +245,7 @@ mod tests {
             clipboard_folder: Some("/c/copied".into()),
             scripts: vec!["devanagari".into()],
             group_similar: false,
-            dynamic_window_size: false,
+            dynamic_window_size: true,
             keys: BTreeMap::from([("trash".into(), "ctrl-backspace".into())]),
         };
         config.save_to(&path).unwrap();
@@ -255,7 +255,7 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("group_similar = false"), "{text}");
-        assert!(text.contains("dynamic_window_size = false"), "{text}");
+        assert!(text.contains("dynamic_window_size = true"), "{text}");
         assert_eq!(Config::load_from(&path).unwrap(), Some(config));
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
@@ -266,18 +266,32 @@ mod tests {
         Config::default().save_to(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            !text.contains("keys") && !text.contains("clipboard") && !text.contains("similar"),
+            !text.contains("keys")
+                && !text.contains("clipboard")
+                && !text.contains("similar")
+                && !text.contains("dynamic_window_size"),
             "{text}"
         );
         // Missing means on.
         assert!(Config::load_from(&path).unwrap().unwrap().group_similar);
         assert!(
-            Config::load_from(&path)
+            !Config::load_from(&path)
                 .unwrap()
                 .unwrap()
                 .dynamic_window_size
         );
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn existing_config_keeps_fixed_palette_unless_display_sizing_is_enabled() {
+        let config: Config = toml::from_str("threads = 2\n").unwrap();
+        assert!(!config.dynamic_window_size);
+        for enabled in [false, true] {
+            let config: Config =
+                toml::from_str(&format!("dynamic_window_size = {enabled}\n")).unwrap();
+            assert_eq!(config.dynamic_window_size, enabled);
+        }
     }
 
     #[test]
